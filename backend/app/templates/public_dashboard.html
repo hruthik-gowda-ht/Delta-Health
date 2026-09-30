@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Public Health Overview — Delta Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .card { background: #12151c; border: 1px solid #1f2430; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 4px; }
+  #mapContainer { height: 420px; border-radius: 10px; }
+  .leaflet-tooltip { background: #1a1f2b; border: 1px solid #2a2e38; color: #e7e9ee; font-size: 11px; }
+  .leaflet-container { background: #0b0d12; }
+  .brand-grad { background: linear-gradient(135deg, #185fa5, #0f6e56); }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-8 py-6">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl brand-grad flex items-center justify-center text-lg font-semibold">Δ</div>
+      <div>
+        <h1 class="text-lg font-medium">Delta Network — Public Health Overview</h1>
+        <p class="text-xs text-gray-500">District-wide disease signal, generated entirely from federated model deltas. No login required.</p>
+      </div>
+    </div>
+    <a href="/login" class="text-xs bg-[#1a1f2b] hover:bg-[#222838] border border-gray-700 px-3 py-2 rounded-lg">Clinic / health officer sign in →</a>
+  </div>
+
+  <!-- Privacy explainer -->
+  <div class="card rounded-xl p-4 mb-6 border-teal-900">
+    <div class="flex items-start gap-3">
+      <span class="text-teal-400 text-lg leading-none">🔒</span>
+      <div class="text-xs text-gray-400 leading-relaxed">
+        <strong class="text-gray-200">Everything on this page is aggregated and de-identified.</strong>
+        No individual patient record, symptom detail, or diagnosis is ever visible here or anywhere outside
+        the clinic that recorded it. Only clinic-level counts, model accuracy, and network-wide alerts —
+        the same class of information a public dashboard for hospital admissions would show — are published.
+      </div>
+    </div>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="card rounded-xl p-4">
+      <div class="text-xs text-gray-500">Clinics connected</div>
+      <div class="text-2xl font-medium mt-1" id="statClinics">—</div>
+    </div>
+    <div class="card rounded-xl p-4">
+      <div class="text-xs text-gray-500">Patients contributing (network-wide)</div>
+      <div class="text-2xl font-medium mt-1" id="statPatients">—</div>
+    </div>
+    <div class="card rounded-xl p-4">
+      <div class="text-xs text-gray-500">Global model round</div>
+      <div class="text-2xl font-medium mt-1" id="statRound">—</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-6 mb-6">
+    <div class="card rounded-xl p-5 col-span-2">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-medium text-gray-300">Clinic network map</h2>
+        <span class="text-xs text-gray-500">Circle size = patients recorded · red = active alert in last 24h</span>
+      </div>
+      <div id="mapContainer"></div>
+    </div>
+    <div class="card rounded-xl p-5">
+      <h2 class="text-sm font-medium text-gray-300 mb-4">Active signals (last 20)</h2>
+      <div id="alertsList" class="space-y-2 text-xs max-h-96 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-6">
+    <div class="card rounded-xl p-5">
+      <h2 class="text-sm font-medium text-gray-300 mb-4">Global model accuracy over training rounds</h2>
+      <canvas id="accChart" height="110"></canvas>
+    </div>
+    <div class="card rounded-xl p-5">
+      <h2 class="text-sm font-medium text-gray-300 mb-1">Treatment efficacy signals</h2>
+      <p class="text-xs text-gray-500 mb-3">Network-wide non-improvement rate by treatment — a possible early resistance indicator.</p>
+      <table class="w-full text-xs">
+        <thead class="text-gray-500 text-left border-b border-gray-800">
+          <tr><th class="py-2 pr-2">Treatment</th><th class="pr-2">Condition</th><th class="pr-2">Records</th><th>Rate</th></tr>
+        </thead>
+        <tbody id="treatmentsTableBody" class="divide-y divide-gray-800"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card rounded-xl p-5 mb-6">
+    <h2 class="text-sm font-medium text-gray-300 mb-1">Stock advisory — for pharmacies & clinics</h2>
+    <p class="text-xs text-gray-500 mb-4">Supply recommendations where a symptom spike is active, plus network-wide treatment demand trends.</p>
+    <div id="clinicAdvisories" class="grid grid-cols-2 gap-4"></div>
+  </div>
+
+  <p class="text-center text-gray-600 text-xs mt-8">Powered by the Delta Network federated learning platform — connecting neighborhood clinics without ever centralizing patient data.</p>
+</div>
+
+<script>
+let leafletMap = null;
+let markerLayer = null;
+let chart = null;
+
+function initMap() {
+  leafletMap = L.map('mapContainer', { zoomControl: true }).setView([15.39, 75.08], 11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 19,
+  }).addTo(leafletMap);
+  markerLayer = L.layerGroup().addTo(leafletMap);
+}
+
+function initChart() {
+  const ctx = document.getElementById('accChart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'Global accuracy', data: [], borderColor: '#3b8bd4',
+      backgroundColor: 'rgba(59,139,212,0.1)', tension: 0.25, fill: true, pointRadius: 3 }] },
+    options: { responsive: true, plugins: { legend: { display: false } },
+      scales: { y: { min: 0.4, max: 1, ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+                x: { ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } } } }
+  });
+}
+
+async function loadOverview() {
+  const res = await fetch('/public/overview');
+  const d = await res.json();
+  document.getElementById('statClinics').textContent = d.total_clinics;
+  document.getElementById('statPatients').textContent = d.total_patients;
+  document.getElementById('statRound').textContent = d.current_round;
+
+  chart.data.labels = d.accuracy_history.map(h => 'round ' + h.round);
+  chart.data.datasets[0].data = d.accuracy_history.map(h => h.accuracy);
+  chart.update();
+}
+
+async function loadHeatmap() {
+  const res = await fetch('/public/heatmap');
+  const rows = await res.json();
+  markerLayer.clearLayers();
+  const bounds = [];
+  rows.forEach(c => {
+    const radius = Math.min(24, 8 + c.patient_count * 0.4);
+    const color = c.alert_count_24h > 0 ? '#E24B4A' : '#3b8bd4';
+    const marker = L.circleMarker([c.lat, c.lng], { radius, color, fillColor: color, fillOpacity: 0.3, weight: 2 }).addTo(markerLayer);
+    marker.bindTooltip(`<strong>${c.name}</strong><br/>${c.city}<br/>${c.patient_count} patients recorded<br/>At-risk rate: ${(c.at_risk_rate*100).toFixed(0)}%${c.alert_count_24h ? `<br/><span style="color:#E24B4A">${c.alert_count_24h} alert(s) in last 24h</span>` : ''}`, { direction: 'top', offset: [0, -radius] });
+    bounds.push([c.lat, c.lng]);
+  });
+  if (bounds.length) leafletMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+}
+
+async function loadAlerts() {
+  const res = await fetch('/public/alerts?limit=20');
+  const rows = await res.json();
+  document.getElementById('alertsList').innerHTML = rows.map(a => {
+    const color = a.severity === 'critical' ? 'border-red-800 bg-red-950/40 text-red-300'
+                : a.severity === 'warning' ? 'border-amber-800 bg-amber-950/40 text-amber-300'
+                : 'border-gray-800 bg-gray-900 text-gray-400';
+    return `<div class="border ${color} rounded-lg p-2.5">${a.message}</div>`;
+  }).join('') || '<div class="text-gray-500">No active signals right now.</div>';
+}
+
+async function loadTreatments() {
+  const res = await fetch('/public/treatments');
+  const rows = await res.json();
+  document.getElementById('treatmentsTableBody').innerHTML = rows.map(t => {
+    const pct = Math.round(t.failure_rate * 100);
+    const color = pct >= 50 ? 'text-red-400' : pct >= 25 ? 'text-amber-400' : 'text-teal-400';
+    return `<tr>
+      <td class="py-2 pr-2">${t.treatment_name}</td>
+      <td class="pr-2 text-gray-400">${t.condition_tag}</td>
+      <td class="pr-2">${t.total_records}</td>
+      <td class="${color}">${pct}%</td>
+    </tr>`;
+  }).join('') || '<tr><td class="py-3 text-gray-500" colspan="4">No treatment outcomes logged network-wide yet.</td></tr>';
+}
+
+async function loadStockAdvisory() {
+  const res = await fetch('/public/stock_advisory');
+  const d = await res.json();
+  const el = document.getElementById('clinicAdvisories');
+  if (!d.clinic_advisories.length) {
+    el.innerHTML = '<div class="col-span-2 text-xs text-gray-500">No clinics are currently spiking — no urgent stock advisories right now.</div>';
+    return;
+  }
+  el.innerHTML = d.clinic_advisories.map(a => `
+    <div class="border border-amber-900 rounded-lg p-4">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="text-xs font-medium text-gray-200">${a.clinic_name}</h3>
+        <span class="text-xs text-gray-500">${a.city}</span>
+      </div>
+      <div class="text-xs text-amber-400 mb-2">Likely pattern: ${a.likely_pattern}</div>
+      <ul class="text-xs text-gray-300 space-y-1 list-disc list-inside">
+        ${a.recommended_supplies.map(s => `<li>${s}</li>`).join('')}
+      </ul>
+    </div>`).join('');
+}
+
+function loadAll() {
+  loadOverview(); loadHeatmap(); loadAlerts(); loadTreatments(); loadStockAdvisory();
+}
+
+initMap();
+initChart();
+loadAll();
+setInterval(loadAll, 10000);
+</script>
+</body>
+</html>

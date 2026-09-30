@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drug Efficacy Tracker — Delta Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .card { background: #12151c; border: 1px solid #1f2430; }
+  input, select, textarea { color: #0b0d12; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 4px; }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-8 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <a href="/admin/dashboard" class="text-xs text-gray-500 hover:text-gray-300">&larr; Back to district overview</a>
+      <h1 class="text-lg font-medium mt-1">Drug Efficacy Tracker</h1>
+      <p class="text-xs text-gray-500">Network-wide treatment outcomes — a resistance signal seen at multiple clinics, surfaced in days not months.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <select id="daysSelect" onchange="loadAll()" class="text-xs bg-[#12151c] border border-gray-700 rounded-lg px-2 py-2">
+        <option value="14">Last 14 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="runCheck()" class="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-medium">Run efficacy check</button>
+    </div>
+  </div>
+
+  <div id="signalResult" class="card rounded-xl p-5 mb-6 hidden"></div>
+
+  <div class="grid grid-cols-3 gap-6 mb-6">
+    <div class="card rounded-xl p-5 col-span-2">
+      <h2 class="text-sm font-medium text-gray-300 mb-1">Non-improvement rate by treatment</h2>
+      <p class="text-xs text-gray-500 mb-3">Click a bar to see its daily outcome trend below.</p>
+      <canvas id="failureBarChart" height="110"></canvas>
+    </div>
+    <div class="card rounded-xl p-5">
+      <h2 class="text-sm font-medium text-gray-300 mb-2">Summary</h2>
+      <div id="summaryList" class="space-y-2 text-xs"></div>
+    </div>
+  </div>
+
+  <div class="card rounded-xl p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-sm font-medium text-gray-300">Daily outcomes — <span id="detailTitle">select a treatment above</span></h2>
+    </div>
+    <p class="text-xs text-gray-500 mb-4">Stacked view: improved (green) vs no-change/worsened (amber/red) per day.</p>
+    <canvas id="detailChart" height="90"></canvas>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('token');
+const role = localStorage.getItem('role');
+if (!token || role !== 'admin') { window.location.href = '/login'; }
+function authHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
+
+let barChart = null, detailChart = null, currentData = null;
+
+function initCharts() {
+  barChart = new Chart(document.getElementById('failureBarChart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Non-improvement rate %', data: [], backgroundColor: [] }] },
+    options: {
+      responsive: true,
+      onClick: (evt, elements) => { if (elements.length) showDetail(elements[0].index); },
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+        x: { ticks: { color: '#8b90a0', autoSkip: false, maxRotation: 30 }, grid: { display: false } },
+      },
+    },
+  });
+
+  detailChart = new Chart(document.getElementById('detailChart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'Improved', data: [], backgroundColor: '#1D9E75' },
+      { label: 'No change', data: [], backgroundColor: '#EF9F27' },
+      { label: 'Worsened', data: [], backgroundColor: '#E24B4A' },
+    ]},
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b90a0', boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        y: { stacked: true, beginAtZero: true, ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+        x: { stacked: true, ticks: { color: '#8b90a0' }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+function showDetail(index) {
+  const s = currentData.series[index];
+  document.getElementById('detailTitle').textContent = `${s.treatment} for ${s.condition}`;
+  detailChart.data.labels = currentData.dates;
+  detailChart.data.datasets[0].data = s.daily_improved;
+  detailChart.data.datasets[1].data = s.daily_no_change;
+  detailChart.data.datasets[2].data = s.daily_worsened;
+  detailChart.update();
+}
+
+async function loadAll() {
+  const days = document.getElementById('daysSelect').value;
+  const res = await fetch(`/admin/drug_efficacy_timeline?days=${days}`, { headers: authHeaders() });
+  if (!res.ok) return;
+  currentData = await res.json();
+
+  barChart.data.labels = currentData.series.map(s => `${s.treatment} / ${s.condition}`);
+  barChart.data.datasets[0].data = currentData.series.map(s => Math.round(s.failure_rate * 100));
+  barChart.data.datasets[0].backgroundColor = currentData.series.map(s =>
+    s.failure_rate >= 0.5 ? '#E24B4A' : s.failure_rate >= 0.25 ? '#EF9F27' : '#1D9E75');
+  barChart.update();
+
+  document.getElementById('summaryList').innerHTML = currentData.series.map(s => {
+    const pct = Math.round(s.failure_rate * 100);
+    const color = pct >= 50 ? 'text-red-400' : pct >= 25 ? 'text-amber-400' : 'text-teal-400';
+    return `<div class="flex justify-between border-b border-gray-800 pb-2">
+      <span>${s.treatment} <span class="text-gray-600">/ ${s.condition}</span></span>
+      <span class="${color}">${pct}%</span>
+    </div>`;
+  }).join('') || '<div class="text-gray-500">No treatment outcomes logged yet.</div>';
+
+  if (currentData.series.length) showDetail(0);
+}
+
+function progressBar(current, required, label) {
+  const pct = Math.min(100, Math.round((current / required) * 100));
+  const met = current >= required;
+  const color = met ? '#1D9E75' : '#3b8bd4';
+  return `
+    <div class="mb-2">
+      <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span>${label}</span>
+        <span class="${met ? 'text-teal-400' : 'text-gray-400'}">${current} / ${required}${met ? ' ✓' : ''}</span>
+      </div>
+      <div class="w-full h-1.5 bg-[#0b0d12] rounded-full overflow-hidden">
+        <div class="h-full rounded-full" style="width:${pct}%; background:${color}"></div>
+      </div>
+    </div>`;
+}
+
+async function runCheck() {
+  const panel = document.getElementById('signalResult');
+  panel.classList.remove('hidden');
+  panel.innerHTML = '<div class="text-xs text-gray-500">Checking...</div>';
+  const res = await fetch('/admin/alerts/check_treatment_failures', { method: 'POST', headers: authHeaders() });
+  const d = await res.json();
+
+  let html = `<div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-medium text-gray-300">Efficacy check result</h3>
+    <button onclick="document.getElementById('signalResult').classList.add('hidden')" class="text-xs text-gray-500 hover:text-gray-300">Dismiss</button>
+  </div>`;
+  if (d.alerts_created.length) {
+    html += d.alerts_created.map(m => `<div class="border border-red-800 bg-red-950/40 text-red-300 rounded-lg p-3 text-xs mb-2">${m}</div>`).join('');
+  } else {
+    html += `<div class="text-xs text-gray-500 mb-3">No alert yet. Needs ${d.min_records}+ records from ${d.min_clinics}+ clinics with ${Math.round(d.rate_threshold*100)}%+ non-improvement.</div>`;
+  }
+  if (d.diagnostics.length) {
+    html += '<div class="mt-2 space-y-3">' + d.diagnostics.map(diag => `
+      <div class="border border-gray-800 rounded-lg p-3">
+        <div class="text-xs text-gray-300 mb-2">${diag.treatment} <span class="text-gray-600">for</span> ${diag.condition}
+          <span class="ml-2 ${diag.failure_rate >= d.rate_threshold ? 'text-red-400' : 'text-gray-500'}">${Math.round(diag.failure_rate*100)}% non-improvement</span>
+        </div>
+        ${progressBar(diag.records, d.min_records, 'Records')}
+        ${progressBar(diag.clinics, d.min_clinics, 'Clinics represented')}
+      </div>`).join('') + '</div>';
+  }
+  panel.innerHTML = html;
+  loadAll();
+}
+
+initCharts();
+loadAll();
+setInterval(loadAll, 10000);
+</script>
+</body>
+</html>

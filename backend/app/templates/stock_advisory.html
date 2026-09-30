@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Advisory — Delta Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .card { background: #12151c; border: 1px solid #1f2430; }
+  input, select, textarea { color: #0b0d12; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 4px; }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-8 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <a href="/admin/dashboard" class="text-xs text-gray-500 hover:text-gray-300">&larr; Back to district overview</a>
+      <h1 class="text-lg font-medium mt-1">Stock Advisory</h1>
+      <p class="text-xs text-gray-500">Outbreak signals translated into specific supply recommendations for clinics and pharmacies.</p>
+    </div>
+    <button onclick="loadAll()" class="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-medium">Refresh now</button>
+  </div>
+
+  <div class="card rounded-xl p-4 mb-6 border-amber-900">
+    <div class="text-xs text-gray-400 leading-relaxed">
+      <strong class="text-gray-200">How this works:</strong> when a clinic shows an active symptom spike, we check
+      what conditions doctors have recently logged treatments for there and match it to a likely disease pattern,
+      recommending disease-specific supplies. Network-wide, we also flag treatments being logged much more often
+      this week than last — a proxy for rising demand, useful for restocking even at clinics that aren't spiking.
+      These are directional recommendations, not exact order quantities.
+    </div>
+  </div>
+
+  <div class="mb-6">
+    <h2 class="text-sm font-medium text-gray-300 mb-3">Active clinic advisories</h2>
+    <div id="clinicAdvisories" class="grid grid-cols-2 gap-4"></div>
+  </div>
+
+  <div class="card rounded-xl p-5">
+    <h2 class="text-sm font-medium text-gray-300 mb-1">Network-wide rising demand</h2>
+    <p class="text-xs text-gray-500 mb-4">Treatments logged significantly more this week vs last week, across all clinics.</p>
+    <canvas id="demandChart" height="90"></canvas>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('token');
+const role = localStorage.getItem('role');
+if (!token || role !== 'admin') { window.location.href = '/login'; }
+function authHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
+
+let demandChart = null;
+
+function initChart() {
+  demandChart = new Chart(document.getElementById('demandChart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'This week', data: [], backgroundColor: '#3b8bd4' },
+      { label: 'Previous week', data: [], backgroundColor: '#2a2e38' },
+    ]},
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b90a0', boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+        x: { ticks: { color: '#8b90a0' }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+function renderClinicAdvisories(advisories) {
+  const el = document.getElementById('clinicAdvisories');
+  if (!advisories.length) {
+    el.innerHTML = '<div class="col-span-2 text-xs text-gray-500 card rounded-xl p-5">No clinics are currently spiking — no urgent stock advisories right now.</div>';
+    return;
+  }
+  el.innerHTML = advisories.map(a => `
+    <div class="card rounded-xl p-5 border-amber-900">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="text-sm font-medium text-gray-200">${a.clinic_name}</h3>
+        <span class="text-xs text-gray-500">${a.city}</span>
+      </div>
+      <div class="text-xs text-amber-400 mb-2">Likely pattern: ${a.likely_pattern}</div>
+      <div class="text-xs text-gray-500 mb-3">${a.reason}</div>
+      <div class="text-xs text-gray-400 mb-1">Recommended supplies:</div>
+      <ul class="text-xs text-gray-200 space-y-1 list-disc list-inside">
+        ${a.recommended_supplies.map(s => `<li>${s}</li>`).join('')}
+      </ul>
+    </div>`).join('');
+}
+
+function renderDemandTrends(trends) {
+  demandChart.data.labels = trends.map(t => t.treatment_name);
+  demandChart.data.datasets[0].data = trends.map(t => t.this_week_count);
+  demandChart.data.datasets[1].data = trends.map(t => t.previous_week_count);
+  demandChart.update();
+}
+
+async function loadAll() {
+  const res = await fetch('/admin/stock_advisory', { headers: authHeaders() });
+  if (!res.ok) return;
+  const d = await res.json();
+  renderClinicAdvisories(d.clinic_advisories);
+  renderDemandTrends(d.demand_trends);
+}
+
+initChart();
+loadAll();
+setInterval(loadAll, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outbreak Monitor — Delta Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .card { background: #12151c; border: 1px solid #1f2430; }
+  input, select, textarea { color: #0b0d12; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 4px; }
+  #mapContainer { height: 460px; border-radius: 10px; }
+  .leaflet-tooltip { background: #1a1f2b; border: 1px solid #2a2e38; color: #e7e9ee; font-size: 11px; }
+  .leaflet-container { background: #0b0d12; }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-8 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <a href="/admin/dashboard" class="text-xs text-gray-500 hover:text-gray-300">&larr; Back to district overview</a>
+      <h1 class="text-lg font-medium mt-1">Outbreak Monitor</h1>
+      <p class="text-xs text-gray-500">Live clinic network map and symptom-spike trends — zero patient-level data.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <select id="daysSelect" onchange="loadTimeline()" class="text-xs bg-[#12151c] border border-gray-700 rounded-lg px-2 py-2">
+        <option value="7">Last 7 days</option>
+        <option value="14" selected>Last 14 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <button onclick="runRegionalCheck()" class="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-medium">Run regional check</button>
+    </div>
+  </div>
+
+  <div id="signalResult" class="card rounded-xl p-5 mb-6 hidden"></div>
+
+  <div class="grid grid-cols-3 gap-6 mb-6">
+    <div class="card rounded-xl p-5 col-span-2">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-medium text-gray-300">Clinic network map</h2>
+        <span class="text-xs text-gray-500">Node size = today's fever cases · red = currently spiking</span>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Click a clinic to draw its <span id="radiusLabel">10km</span> radius and see which neighbors fall inside it.</p>
+      <div id="mapContainer"></div>
+    </div>
+
+    <div class="card rounded-xl p-5">
+      <h2 class="text-sm font-medium text-gray-300 mb-2">Legend & status</h2>
+      <div id="clinicStatusList" class="space-y-2 text-xs"></div>
+    </div>
+  </div>
+
+  <div class="card rounded-xl p-5">
+    <h2 class="text-sm font-medium text-gray-300 mb-1">Daily fever-symptom cases per clinic</h2>
+    <p class="text-xs text-gray-500 mb-4">Click a legend entry to isolate a clinic's trend line.</p>
+    <canvas id="timelineChart" height="90"></canvas>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('token');
+const role = localStorage.getItem('role');
+if (!token || role !== 'admin') { window.location.href = '/login'; }
+function authHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
+
+const PALETTE = ['#3b8bd4', '#1D9E75', '#EF9F27', '#9B6BD6', '#E24B4A', '#5dcaa5'];
+let chart = null;
+let currentSeries = [];
+let currentRadiusKm = 10;
+let currentMinClinics = 2;
+
+function initChart() {
+  const ctx = document.getElementById('timelineChart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b90a0', boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+        x: { ticks: { color: '#8b90a0' }, grid: { color: '#1f2430' } },
+      },
+    },
+  });
+}
+
+let leafletMap = null;
+let markerLayer = null;
+let radiusLayer = null;
+
+function initLeafletMap() {
+  leafletMap = L.map('mapContainer', { zoomControl: true }).setView([15.39, 75.08], 11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 19,
+  }).addTo(leafletMap);
+  markerLayer = L.layerGroup().addTo(leafletMap);
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const toRad = deg => deg * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function renderMap(series, radiusKm) {
+  markerLayer.clearLayers();
+  if (radiusLayer) { leafletMap.removeLayer(radiusLayer); radiusLayer = null; }
+
+  const bounds = [];
+  series.forEach(s => {
+    const todayCount = s.daily_counts[s.daily_counts.length - 1] || 0;
+    const radius = Math.min(24, 8 + todayCount * 2.5);
+    const color = s.is_spiking ? '#E24B4A' : '#3b8bd4';
+    const marker = L.circleMarker([s.lat, s.lng], {
+      radius, color, fillColor: color, fillOpacity: 0.3, weight: 2,
+    }).addTo(markerLayer);
+    marker.bindTooltip(
+      `<strong>${s.name}</strong><br/>${s.city}<br/>${todayCount} fever cases today` +
+      (s.is_spiking ? '<br/><span style="color:#E24B4A">Currently spiking</span>' : ''),
+      { direction: 'top', offset: [0, -radius] }
+    );
+    marker.on('click', () => {
+      if (radiusLayer) leafletMap.removeLayer(radiusLayer);
+      radiusLayer = L.circle([s.lat, s.lng], {
+        radius: radiusKm * 1000, color: '#EF9F27', weight: 1.5,
+        fillOpacity: 0.05, dashArray: '6 6',
+      }).addTo(leafletMap);
+    });
+    bounds.push([s.lat, s.lng]);
+  });
+
+  // faint connecting lines between clinics within the alert radius (real haversine distance)
+  for (let i = 0; i < series.length; i++) {
+    for (let j = i + 1; j < series.length; j++) {
+      const dist = haversineKm(series[i].lat, series[i].lng, series[j].lat, series[j].lng);
+      if (dist <= radiusKm) {
+        L.polyline([[series[i].lat, series[i].lng], [series[j].lat, series[j].lng]], {
+          color: '#2a2e38', weight: 1, dashArray: '4 4',
+        }).addTo(markerLayer);
+      }
+    }
+  }
+
+  if (bounds.length) leafletMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+}
+
+function renderStatusList(series) {
+  document.getElementById('clinicStatusList').innerHTML = series.map(s => {
+    const todayCount = s.daily_counts[s.daily_counts.length - 1] || 0;
+    const color = s.is_spiking ? 'text-red-400' : 'text-gray-400';
+    return `<div class="flex justify-between items-center border-b border-gray-800 pb-2">
+      <span>${s.name} <span class="text-gray-600">· ${s.city}</span></span>
+      <span class="${color}">${todayCount}${s.is_spiking ? ' ⚠' : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadTimeline() {
+  const days = document.getElementById('daysSelect').value;
+  const res = await fetch(`/admin/outbreak_timeline?days=${days}`, { headers: authHeaders() });
+  if (!res.ok) return;
+  const d = await res.json();
+  currentSeries = d.series;
+  currentRadiusKm = d.radius_km;
+  currentMinClinics = d.min_clinics_required;
+  document.getElementById('radiusLabel').textContent = d.radius_km + 'km';
+
+  renderMap(d.series, d.radius_km);
+  renderStatusList(d.series);
+
+  chart.data.labels = d.dates;
+  chart.data.datasets = d.series.map((s, i) => ({
+    label: s.name, data: s.daily_counts,
+    borderColor: PALETTE[i % PALETTE.length],
+    backgroundColor: PALETTE[i % PALETTE.length] + '22',
+    tension: 0.25, pointRadius: 2,
+  }));
+  chart.update();
+}
+
+function progressBar(current, required, label) {
+  const pct = Math.min(100, Math.round((current / required) * 100));
+  const met = current >= required;
+  const color = met ? '#1D9E75' : '#3b8bd4';
+  return `
+    <div class="mb-2">
+      <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span>${label}</span>
+        <span class="${met ? 'text-teal-400' : 'text-gray-400'}">${current} / ${required}${met ? ' ✓' : ''}</span>
+      </div>
+      <div class="w-full h-1.5 bg-[#0b0d12] rounded-full overflow-hidden">
+        <div class="h-full rounded-full" style="width:${pct}%; background:${color}"></div>
+      </div>
+    </div>`;
+}
+
+async function runRegionalCheck() {
+  const panel = document.getElementById('signalResult');
+  panel.classList.remove('hidden');
+  panel.innerHTML = '<div class="text-xs text-gray-500">Checking...</div>';
+  const res = await fetch('/admin/alerts/check_regional', { method: 'POST', headers: authHeaders() });
+  const d = await res.json();
+
+  let html = `<div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-medium text-gray-300">Regional check result</h3>
+    <button onclick="document.getElementById('signalResult').classList.add('hidden')" class="text-xs text-gray-500 hover:text-gray-300">Dismiss</button>
+  </div>`;
+  if (d.alert_created) {
+    html += `<div class="border border-red-800 bg-red-950/40 text-red-300 rounded-lg p-3 text-xs mb-3">${d.alert_created}</div>`;
+  } else {
+    html += `<div class="text-xs text-gray-500 mb-3">No regional alert yet.</div>`;
+  }
+  html += progressBar(d.spiking_clinics.length, d.min_clinics_required, 'Clinics currently spiking (any distance)');
+  html += progressBar(d.largest_cluster_size, d.min_clinics_required, `Largest cluster within ${d.radius_km}km`);
+  panel.innerHTML = html;
+  loadTimeline();
+}
+
+initChart();
+initLeafletMap();
+loadTimeline();
+setInterval(loadTimeline, 8000);
+</script>
+</body>
+</html>

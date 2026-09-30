@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clinic Portal — Delta Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .card { background: #12151c; border: 1px solid #1f2430; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 4px; }
+  input, select, textarea { color: #0b0d12; }
+  input::placeholder, textarea::placeholder { color: #8b90a0; }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen flex">
+
+  <!-- Sidebar -->
+  <aside class="w-60 bg-[#0e1016] border-r border-gray-800 flex flex-col shrink-0">
+    <div class="px-5 py-5 border-b border-gray-800">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-teal-600 flex items-center justify-center text-sm font-semibold">Δ</div>
+        <div>
+          <div class="text-sm font-medium">Delta Network</div>
+          <div class="text-xs text-gray-500">Clinic portal</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
+      <a href="#" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#161a24] text-white">Dashboard</a>
+      <a href="#patientsSection" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#161a24] hover:text-white">Patients</a>
+      <a href="#alertsSection" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#161a24] hover:text-white">Alerts</a>
+    </nav>
+    <div class="px-4 py-4 border-t border-gray-800 text-xs text-gray-500">
+      <div id="clinicNameLabel" class="text-gray-300 mb-2">—</div>
+      <button onclick="logout()" class="text-red-400 hover:text-red-300">Sign out</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 overflow-y-auto h-screen px-8 py-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-lg font-medium">Clinic dashboard</h1>
+        <p class="text-xs text-gray-500">Your patient data never leaves this database. Only trained model deltas are sent.</p>
+      </div>
+      <div class="text-xs text-gray-500">Global round <span id="globalRound" class="text-gray-200 font-medium">—</span></div>
+    </div>
+
+    <!-- Model sync status -->
+    <div id="syncBanner" class="card rounded-xl px-4 py-3 mb-6 text-xs text-gray-400">Checking sync status...</div>
+
+    <!-- Stat cards -->
+    <div class="grid grid-cols-2 gap-4 mb-6">
+      <div class="card rounded-xl p-4">
+        <div class="text-xs text-gray-500">Patients recorded</div>
+        <div class="text-2xl font-medium mt-1" id="statPatients">—</div>
+      </div>
+      <div class="card rounded-xl p-4">
+        <div class="text-xs text-gray-500">At-risk rate</div>
+        <div class="text-2xl font-medium mt-1" id="statAtRisk">—</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6 mb-6">
+      <!-- Add patient form -->
+      <div class="card rounded-xl p-5 col-span-2" id="patientsSection">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-medium text-gray-300">Add patient encounter</h2>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">Stored locally only</span>
+            <label class="text-xs bg-[#1a1f2b] hover:bg-[#222838] border border-gray-700 px-3 py-1.5 rounded-lg cursor-pointer">
+              Import CSV
+              <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="importCsv(this.files[0])"/>
+            </label>
+          </div>
+        </div>
+        <div id="csvImportMsg" class="text-xs mb-3"></div>
+        <form id="patientForm" class="grid grid-cols-3 gap-3 text-sm">
+          <div><label class="block text-xs text-gray-500 mb-1">Age</label>
+            <input name="age" type="number" step="1" min="0" max="120" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">BMI</label>
+            <input name="bmi" type="number" step="0.1" min="10" max="70" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Resting HR (30-220)</label>
+            <input name="resting_hr" type="number" step="1" min="30" max="220" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Fever (days)</label>
+            <input name="fever_days" type="number" step="1" min="0" max="30" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Cough severity (0-3)</label>
+            <input name="cough_severity" type="number" step="1" min="0" max="3" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Fatigue score (0-10)</label>
+            <input name="fatigue_score" type="number" step="1" min="0" max="10" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Existing condition</label>
+            <select name="existing_condition" class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5">
+              <option value="0">No</option><option value="1">Yes</option>
+            </select></div>
+          <div><label class="block text-xs text-gray-500 mb-1">BP systolic (60-260)</label>
+            <input name="bp_systolic" type="number" step="1" min="60" max="260" required class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Doctor's risk assessment</label>
+            <select name="at_risk" class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5">
+              <option value="0">Low risk</option><option value="1">At risk</option>
+            </select></div>
+          <div class="col-span-3"><label class="block text-xs text-gray-500 mb-1">Symptom tags (comma separated)</label>
+            <input name="symptom_tags" type="text" placeholder="fever, cough, fatigue"
+              class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div class="col-span-3">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
+              Save patient record
+            </button>
+            <button type="button" onclick="askGlobalAI()" class="bg-[#1a1f2b] hover:bg-[#222838] border border-gray-700 transition text-gray-200 text-sm font-medium px-4 py-2 rounded-lg ml-2">
+              Ask Global AI for a risk assessment
+            </button>
+            <span id="patientMsg" class="text-xs text-teal-400 ml-3"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- Train & submit -->
+      <div class="card rounded-xl p-5">
+        <h2 class="text-sm font-medium text-gray-300 mb-2">Train & contribute</h2>
+        <p class="text-xs text-gray-500 mb-4">Trains a model on your local patients only, then sends the mathematical delta — never a patient record — to the central aggregator.</p>
+        <label class="flex items-center gap-2 text-xs text-gray-400 mb-3">
+          <input type="checkbox" id="dpToggle" class="rounded"/> Add differential-privacy noise to delta
+        </label>
+        <button onclick="trainAndSubmit()" class="w-full bg-teal-600 hover:bg-teal-500 transition text-white text-sm font-medium py-2.5 rounded-lg">
+          Train locally & submit delta
+        </button>
+        <div id="trainResult" class="mt-4 text-xs text-gray-400 space-y-1"></div>
+      </div>
+    </div>
+
+    <!-- Global AI Assistant -->
+    <div class="card rounded-xl p-5 mb-6" id="aiAssistantSection">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-sm font-medium text-gray-300">Global AI Assistant</h2>
+        <span class="text-xs text-gray-500">Powered by the network-wide model, not just your clinic's data</span>
+      </div>
+      <p class="text-xs text-gray-500 mb-4">Fill in the vitals above, tick any observed symptoms below, then click "Ask Global AI".</p>
+
+      <div class="mb-4">
+        <div class="text-xs text-gray-500 mb-2">Observed symptoms (optional — powers the differential diagnosis suggestion)</div>
+        <div class="grid grid-cols-5 gap-2 text-xs">
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_high_fever" class="rounded"/> High fever (&gt;102°F)</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_pain_behind_eyes" class="rounded"/> Pain behind eyes</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_dry_cough" class="rounded"/> Dry cough & cold</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_low_platelet" class="rounded"/> Low platelet (&lt;100k)</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_joint_bone_pain" class="rounded"/> Joint / bone pain</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_skin_rash" class="rounded"/> Skin rash / petechiae</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_nausea_vomiting" class="rounded"/> Nausea / vomiting</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_diarrhea_abdominal" class="rounded"/> Diarrhea / abdominal cramps</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_chills_rigors" class="rounded"/> Chills & rigors</label>
+          <label class="flex items-center gap-1.5"><input type="checkbox" id="sym_sore_throat" class="rounded"/> Sore throat</label>
+        </div>
+      </div>
+
+      <div id="aiResult" class="text-sm text-gray-500">No assessment run yet.</div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6">
+      <!-- Patients table -->
+      <div class="card rounded-xl p-5 col-span-2">
+        <h2 class="text-sm font-medium text-gray-300 mb-4">Recent patients</h2>
+        <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="text-gray-500 text-left border-b border-gray-800">
+            <tr><th class="py-2 pr-2">Age</th><th class="pr-2">BMI</th><th class="pr-2">Fever days</th>
+                <th class="pr-2">Cough</th><th class="pr-2">Risk</th><th class="pr-2">Tags</th><th>When</th></tr>
+          </thead>
+          <tbody id="patientsTableBody" class="divide-y divide-gray-800"></tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div class="card rounded-xl p-5" id="alertsSection">
+        <h2 class="text-sm font-medium text-gray-300 mb-4">Alerts</h2>
+        <div id="alertsList" class="space-y-2 text-xs"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6 mt-6">
+      <!-- Treatment outcomes -->
+      <div class="card rounded-xl p-5 col-span-2" id="treatmentsSection">
+        <h2 class="text-sm font-medium text-gray-300 mb-1">Log treatment outcome</h2>
+        <p class="text-xs text-gray-500 mb-4">Feeds the network-wide drug efficacy signal — flags if a treatment stops working across multiple clinics at once.</p>
+        <form id="treatmentForm" class="grid grid-cols-4 gap-3 text-sm mb-4">
+          <div><label class="block text-xs text-gray-500 mb-1">Treatment given</label>
+            <input name="treatment_name" type="text" required placeholder="e.g. amoxicillin"
+              class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Condition treated</label>
+            <input name="condition_tag" type="text" required placeholder="e.g. resp_infection"
+              class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5"/></div>
+          <div><label class="block text-xs text-gray-500 mb-1">Outcome</label>
+            <select name="outcome" class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-2 py-1.5">
+              <option value="improved">Improved</option>
+              <option value="no_change">No change</option>
+              <option value="worsened">Worsened</option>
+            </select></div>
+          <div class="flex items-end">
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 transition text-white text-sm font-medium py-1.5 rounded-lg">Log outcome</button>
+          </div>
+        </form>
+        <div id="treatmentMsg" class="text-xs mb-3"></div>
+        <table class="w-full text-xs">
+          <thead class="text-gray-500 text-left border-b border-gray-800">
+            <tr><th class="py-2 pr-2">Treatment</th><th class="pr-2">Condition</th><th class="pr-2">Outcome</th><th>When</th></tr>
+          </thead>
+          <tbody id="treatmentsTableBody" class="divide-y divide-gray-800"></tbody>
+        </table>
+      </div>
+
+      <!-- Global AI confidence context reminder -->
+      <div class="card rounded-xl p-5">
+        <h2 class="text-sm font-medium text-gray-300 mb-2">Why log outcomes?</h2>
+        <p class="text-xs text-gray-500 leading-relaxed">
+          If a treatment starts failing at your clinic, that could just be one hard case. If it's failing
+          at several clinics at the same time, that's an early antimicrobial-resistance signal — and the
+          only way to see that pattern is across the whole network, not from inside one clinic.
+        </p>
+      </div>
+    </div>
+  </main>
+
+<script>
+const token = localStorage.getItem('token');
+const role = localStorage.getItem('role');
+if (!token || role !== 'clinic') { window.location.href = '/login'; }
+document.getElementById('clinicNameLabel').textContent = localStorage.getItem('full_name') || 'Clinic account';
+
+function authHeaders(extra) {
+  return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {});
+}
+function logout() { localStorage.clear(); window.location.href = '/login'; }
+
+async function loadSummary() {
+  const res = await fetch('/clinic/summary', { headers: authHeaders() });
+  if (res.status === 401) return logout();
+  const d = await res.json();
+  document.getElementById('statPatients').textContent = d.patient_count;
+  document.getElementById('statAtRisk').textContent = (d.at_risk_rate * 100).toFixed(0) + '%';
+  document.getElementById('globalRound').textContent = d.global_round;
+  document.getElementById('clinicNameLabel').textContent = d.clinic_name;
+}
+
+async function loadSyncStatus() {
+  const res = await fetch('/clinic/model_status', { headers: authHeaders() });
+  if (!res.ok) return;
+  const d = await res.json();
+  const banner = document.getElementById('syncBanner');
+  if (d.clinic_last_synced_round === null) {
+    banner.innerHTML = `<span class="text-amber-400">You haven't trained & submitted a delta yet.</span> The network has ${d.total_network_patients} patients across ${d.total_network_clinics} clinics so far.`;
+  } else if (d.rounds_behind === 0) {
+    banner.innerHTML = `<span class="text-teal-400">Up to date</span> — synced at round ${d.clinic_last_synced_round}. ${d.patients_added_since_last_sync ? d.patients_added_since_last_sync + ' new patient(s) recorded since then — train again to contribute them.' : ''}`;
+  } else {
+    banner.innerHTML = `<span class="text-amber-400">${d.rounds_behind} round(s) behind</span> the network (you're at round ${d.clinic_last_synced_round}, network is at round ${d.global_round}). ${d.patients_added_since_last_sync} new patient(s) recorded since your last sync.`;
+  }
+}
+
+async function loadPatients() {
+  const res = await fetch('/clinic/patients?limit=25', { headers: authHeaders() });
+  const rows = await res.json();
+  document.getElementById('patientsTableBody').innerHTML = rows.map(p => `
+    <tr>
+      <td class="py-2 pr-2">${p.age}</td>
+      <td class="pr-2">${p.bmi}</td>
+      <td class="pr-2">${p.fever_days}</td>
+      <td class="pr-2">${p.cough_severity}</td>
+      <td class="pr-2">${p.at_risk ? '<span class="text-red-400">at risk</span>' : '<span class="text-gray-500">low</span>'}</td>
+      <td class="pr-2 text-gray-500">${p.symptom_tags || '—'}</td>
+      <td class="text-gray-500">${new Date(p.created_at).toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td class="py-3 text-gray-500" colspan="7">No patients recorded yet.</td></tr>';
+}
+
+async function loadAlerts() {
+  const res = await fetch('/clinic/alerts', { headers: authHeaders() });
+  const rows = await res.json();
+  document.getElementById('alertsList').innerHTML = rows.map(a => {
+    const color = a.severity === 'critical' ? 'border-red-800 bg-red-950/40 text-red-300'
+                : a.severity === 'warning' ? 'border-amber-800 bg-amber-950/40 text-amber-300'
+                : 'border-gray-800 bg-gray-900 text-gray-400';
+    return `<div class="border ${color} rounded-lg p-2.5">${a.message}</div>`;
+  }).join('') || '<div class="text-gray-500">No active alerts.</div>';
+}
+
+document.getElementById('patientForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  const payload = Object.fromEntries(form.entries());
+  ['age','bmi','resting_hr','fever_days','cough_severity','fatigue_score','existing_condition','bp_systolic','at_risk']
+    .forEach(k => payload[k] = Number(payload[k]));
+
+  const res = await fetch('/clinic/patients', {
+    method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
+    body: JSON.stringify(payload),
+  });
+  const msgEl = document.getElementById('patientMsg');
+  if (res.ok) {
+    msgEl.textContent = 'Saved.';
+    msgEl.className = 'text-xs text-teal-400 ml-3';
+    e.target.reset();
+    loadPatients(); loadSummary(); loadAlerts();
+    setTimeout(() => msgEl.textContent = '', 2000);
+  } else {
+    const err = await res.json();
+    let message = 'could not save';
+    if (typeof err.detail === 'string') {
+      message = err.detail;
+    } else if (Array.isArray(err.detail)) {
+      // FastAPI validation errors: [{loc: [...], msg: "...", ...}, ...]
+      message = err.detail.map(d => {
+        const field = d.loc ? d.loc[d.loc.length - 1] : 'field';
+        return `${field}: ${d.msg}`;
+      }).join('; ');
+    }
+    msgEl.textContent = 'Error: ' + message;
+    msgEl.className = 'text-xs text-red-400 ml-3';
+  }
+});
+
+async function loadTreatments() {
+  const res = await fetch('/clinic/treatments', { headers: authHeaders() });
+  if (!res.ok) return;
+  const rows = await res.json();
+  document.getElementById('treatmentsTableBody').innerHTML = rows.map(t => {
+    const color = t.outcome === 'improved' ? 'text-teal-400' : t.outcome === 'worsened' ? 'text-red-400' : 'text-amber-400';
+    return `<tr>
+      <td class="py-2 pr-2">${t.treatment_name}</td>
+      <td class="pr-2 text-gray-400">${t.condition_tag}</td>
+      <td class="pr-2 ${color}">${t.outcome.replace('_',' ')}</td>
+      <td class="text-gray-500">${new Date(t.created_at).toLocaleString()}</td>
+    </tr>`;
+  }).join('') || '<tr><td class="py-3 text-gray-500" colspan="4">No treatment outcomes logged yet.</td></tr>';
+}
+
+document.getElementById('treatmentForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  const payload = Object.fromEntries(form.entries());
+  const msgEl = document.getElementById('treatmentMsg');
+
+  const res = await fetch('/clinic/treatments', {
+    method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) {
+    msgEl.textContent = 'Logged.';
+    msgEl.className = 'text-xs text-teal-400 mb-3';
+    e.target.reset();
+    loadTreatments();
+    setTimeout(() => msgEl.textContent = '', 2000);
+  } else {
+    const err = await res.json();
+    msgEl.textContent = 'Error: ' + (typeof err.detail === 'string' ? err.detail : 'could not save');
+    msgEl.className = 'text-xs text-red-400 mb-3';
+  }
+});
+
+async function importCsv(file) {
+  if (!file) return;
+  const msgEl = document.getElementById('csvImportMsg');
+  msgEl.className = 'text-xs text-gray-500 mb-3';
+  msgEl.textContent = 'Importing...';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/clinic/patients/bulk_import', {
+      method: 'POST', headers: authHeaders(), body: fd,
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      msgEl.className = 'text-xs text-red-400 mb-3';
+      msgEl.textContent = 'Error: ' + (typeof d.detail === 'string' ? d.detail : 'import failed');
+      return;
+    }
+    msgEl.className = d.rows_failed > 0 ? 'text-xs text-amber-400 mb-3' : 'text-xs text-teal-400 mb-3';
+    msgEl.textContent = `Imported ${d.rows_imported}/${d.rows_received} rows.` +
+      (d.rows_failed > 0 ? ` ${d.rows_failed} failed: ${d.errors.slice(0,3).join(' | ')}` : '');
+    loadPatients(); loadSummary(); loadAlerts();
+  } catch (e) {
+    msgEl.className = 'text-xs text-red-400 mb-3';
+    msgEl.textContent = 'Could not reach server';
+  }
+  document.getElementById('csvFileInput').value = '';
+}
+
+async function trainAndSubmit() {
+  const dp = document.getElementById('dpToggle').checked;
+  const resultEl = document.getElementById('trainResult');
+  resultEl.innerHTML = 'Training locally...';
+  try {
+    const res = await fetch(`/clinic/train?use_dp_noise=${dp}`, { method: 'POST', headers: authHeaders() });
+    const d = await res.json();
+    if (!res.ok) { resultEl.innerHTML = `<span class="text-red-400">${d.detail}</span>`; return; }
+    resultEl.innerHTML = `
+      <div>Local accuracy: <span class="text-gray-200">${(d.local_acc*100).toFixed(1)}%</span></div>
+      <div>Trained on: <span class="text-gray-200">${d.n_samples}</span> local patients (not transmitted)</div>
+      <div>Transmitted: <span class="text-teal-400">${d.kb_transmitted} KB</span> of delta only, for round ${d.round_trained_for}</div>
+    `;
+    loadSummary();
+  } catch (e) {
+    resultEl.innerHTML = '<span class="text-red-400">Could not reach server</span>';
+  }
+}
+
+loadSummary(); loadPatients(); loadAlerts(); loadSyncStatus(); loadTreatments();
+setInterval(() => { loadSummary(); loadAlerts(); loadSyncStatus(); }, 5000);
+
+async function askGlobalAI() {
+  const resultEl = document.getElementById('aiResult');
+  const form = document.getElementById('patientForm');
+  const fd = new FormData(form);
+
+  const required = ['age','bmi','resting_hr','fever_days','cough_severity','fatigue_score','existing_condition','bp_systolic'];
+  const payload = {};
+  for (const key of required) {
+    const val = fd.get(key);
+    if (val === null || val === '') {
+      resultEl.innerHTML = `<span class="text-amber-400">Fill in ${key.replace('_',' ')} above first.</span>`;
+      return;
+    }
+    payload[key] = Number(val);
+  }
+
+  const symptomKeys = ['high_fever','pain_behind_eyes','dry_cough','low_platelet','joint_bone_pain',
+                        'skin_rash','nausea_vomiting','diarrhea_abdominal','chills_rigors','sore_throat'];
+  for (const key of symptomKeys) {
+    const el = document.getElementById('sym_' + key);
+    payload[key] = el ? el.checked : false;
+  }
+
+  resultEl.innerHTML = '<span class="text-gray-500">Asking the global model...</span>';
+  try {
+    const res = await fetch('/clinic/predict', {
+      method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
+      body: JSON.stringify(payload),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      resultEl.innerHTML = `<span class="text-red-400">${typeof d.detail === 'string' ? d.detail : 'Could not run assessment'}</span>`;
+      return;
+    }
+
+    const riskColor = d.risk_label === 'High' ? 'text-red-400 border-red-800 bg-red-950/30'
+                     : d.risk_label === 'Moderate' ? 'text-amber-400 border-amber-800 bg-amber-950/30'
+                     : 'text-teal-400 border-teal-800 bg-teal-950/30';
+    const pct = Math.round(d.risk_probability * 100);
+    const confColor = d.confidence_label === 'High' ? 'text-teal-400 border-teal-800 bg-teal-950/30'
+                     : d.confidence_label === 'Moderate' ? 'text-amber-400 border-amber-800 bg-amber-950/30'
+                     : 'text-gray-400 border-gray-700 bg-gray-900/30';
+    const confPct = Math.round(d.confidence_score * 100);
+
+    const contribHtml = d.top_contributions.map(c => {
+      const dirColor = c.direction === 'increases_risk' ? '#E24B4A' : '#1D9E75';
+      const dirLabel = c.direction === 'increases_risk' ? 'pushes risk up' : 'pushes risk down';
+      const width = Math.min(100, Math.abs(c.contribution) * 40);
+      return `
+        <div class="mb-2">
+          <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span>${c.label} <span class="text-gray-600">(${c.value})</span></span>
+            <span style="color:${dirColor}">${dirLabel}</span>
+          </div>
+          <div class="w-full h-1.5 bg-[#0b0d12] rounded-full overflow-hidden">
+            <div class="h-full rounded-full" style="width:${width}%; background:${dirColor}"></div>
+          </div>
+        </div>`;
+    }).join('');
+
+    const cohortHtml = d.cohort
+      ? `<div class="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-800">
+           Across the network: <span class="text-gray-200">${d.cohort.n_similar_cases}</span> similar cases
+           from <span class="text-gray-200">${d.cohort.clinics_represented}</span> clinic(s) —
+           <span class="text-gray-200">${(d.cohort.at_risk_rate*100).toFixed(0)}%</span> were flagged at-risk.
+         </div>`
+      : `<div class="text-xs text-gray-600 mt-3 pt-3 border-t border-gray-800">Not enough similar cases in the network yet for a cohort comparison.</div>`;
+
+    const differentialHtml = d.differential.length ? `
+      <div class="mt-4 pt-4 border-t border-gray-800">
+        <div class="text-xs text-gray-500 mb-2">Differential diagnosis (rule-based decision support, not a trained classifier):</div>
+        ${d.differential.map((dm, i) => {
+          const barColor = i === 0 ? '#E24B4A' : '#EF9F27';
+          return `
+            <div class="mb-2">
+              <div class="flex justify-between text-xs text-gray-300 mb-1">
+                <span>${dm.disease}${dm.reasons.length ? ` <span class="text-gray-600">— ${dm.reasons.join(', ')}</span>` : ''}</span>
+                <span style="color:${barColor}">${dm.match_pct}% match</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#0b0d12] rounded-full overflow-hidden">
+                <div class="h-full rounded-full" style="width:${dm.match_pct}%; background:${barColor}"></div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>` : '';
+
+    const recommendationsHtml = d.recommendations.length ? `
+      <div class="mt-4 pt-4 border-t border-gray-800">
+        <div class="text-xs text-gray-500 mb-2">Clinical decision support (verify against local guidelines — not a substitute for clinical judgment):</div>
+        <ul class="text-xs text-gray-300 space-y-1 list-disc list-inside">
+          ${d.recommendations.map(r => `<li>${r}</li>`).join('')}
+        </ul>
+      </div>` : '';
+
+    const federatedContextHtml = `
+      <div class="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-800">
+        <span class="text-gray-400">Federated context:</span> ${d.federated_context}
+      </div>`;
+
+    resultEl.innerHTML = `
+      <div class="flex items-center gap-4 mb-4">
+        <div class="border ${riskColor} rounded-xl px-4 py-3 text-center">
+          <div class="text-2xl font-medium">${pct}%</div>
+          <div class="text-xs">${d.risk_label} risk</div>
+        </div>
+        <div class="border ${confColor} rounded-xl px-4 py-3 text-center">
+          <div class="text-lg font-medium">${confPct}%</div>
+          <div class="text-xs">${d.confidence_label} confidence</div>
+        </div>
+        <div class="text-xs text-gray-500 flex-1">${d.training_context}</div>
+      </div>
+      <div class="text-xs text-gray-500 mb-2">Why the AI thinks this:</div>
+      ${contribHtml}
+      ${cohortHtml}
+      ${differentialHtml}
+      ${recommendationsHtml}
+      ${federatedContextHtml}
+    `;
+  } catch (e) {
+    resultEl.innerHTML = '<span class="text-red-400">Could not reach server</span>';
+  }
+}
+</script>
+</body>
+</html>

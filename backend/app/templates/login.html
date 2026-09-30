@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delta Network — Sign in</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0d12; }
+  .brand-grad { background: linear-gradient(135deg, #185fa5, #0f6e56); }
+  input, select, textarea { color: #0b0d12; }
+  input::placeholder, textarea::placeholder { color: #8b90a0; }
+</style>
+</head>
+<body class="min-h-screen flex items-center justify-center text-gray-100">
+  <div class="w-full max-w-md mx-4">
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl brand-grad mb-4">
+        <span class="text-2xl font-semibold text-white">Δ</span>
+      </div>
+      <h1 class="text-2xl font-medium">Delta Network</h1>
+      <p class="text-gray-400 text-sm mt-1">Privacy-first federated healthcare intelligence</p>
+    </div>
+
+    <div class="bg-[#12151c] border border-gray-800 rounded-2xl p-8 shadow-xl">
+      <div class="flex gap-2 mb-6 bg-[#0b0d12] p-1 rounded-lg text-sm">
+        <button id="tabClinic" onclick="setTab('clinic')" class="flex-1 py-2 rounded-md transition">Clinic portal</button>
+        <button id="tabAdmin" onclick="setTab('admin')" class="flex-1 py-2 rounded-md transition">Public health portal</button>
+      </div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Username</label>
+          <input id="username" type="text" required autocomplete="username"
+            class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Password</label>
+          <input id="password" type="password" required autocomplete="current-password"
+            class="w-full bg-[#0b0d12] border border-gray-700 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500" />
+        </div>
+        <p id="errorMsg" class="text-red-400 text-xs hidden"></p>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 transition text-white text-sm font-medium py-2.5 rounded-lg">
+          Sign in
+        </button>
+      </form>
+
+      <div class="mt-6 pt-6 border-t border-gray-800 text-xs text-gray-500 leading-relaxed" id="demoHint">
+        Demo clinic login: <code class="text-gray-300">clinic1 / clinic123</code>
+      </div>
+    </div>
+    <p class="text-center text-gray-600 text-xs mt-6">No patient record ever leaves a clinic's own database.</p>
+    <p class="text-center text-xs mt-3"><a href="/public" class="text-blue-400 hover:text-blue-300">View public health overview (no login required) →</a></p>
+  </div>
+
+<script>
+let activeTab = 'clinic';
+function setTab(tab) {
+  activeTab = tab;
+  document.getElementById('tabClinic').className = 'flex-1 py-2 rounded-md transition ' + (tab==='clinic' ? 'bg-blue-600 text-white' : 'text-gray-400');
+  document.getElementById('tabAdmin').className = 'flex-1 py-2 rounded-md transition ' + (tab==='admin' ? 'bg-blue-600 text-white' : 'text-gray-400');
+  document.getElementById('demoHint').innerHTML = tab === 'clinic'
+    ? 'Demo clinic login: <code class="text-gray-300">clinic1 / clinic123</code>'
+    : 'Demo public health login: <code class="text-gray-300">healthofficer / admin123</code>';
+}
+setTab('clinic');
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('errorMsg');
+  errorEl.classList.add('hidden');
+  const body = new URLSearchParams();
+  body.append('username', document.getElementById('username').value);
+  body.append('password', document.getElementById('password').value);
+
+  try {
+    const res = await fetch('/auth/login', { method: 'POST', body });
+    if (!res.ok) {
+      const err = await res.json();
+      errorEl.textContent = err.detail || 'Login failed';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    const data = await res.json();
+    localStorage.setItem('token', data.access_token);
+    localStorage.setItem('role', data.role);
+    localStorage.setItem('clinic_id', data.clinic_id ?? '');
+    localStorage.setItem('full_name', data.full_name ?? '');
+
+    if (data.role === 'clinic') {
+      window.location.href = '/clinic/dashboard';
+    } else {
+      window.location.href = '/admin/dashboard';
+    }
+  } catch (err) {
+    errorEl.textContent = 'Could not reach server';
+    errorEl.classList.remove('hidden');
+  }
+});
+</script>
+</body>
+</html>
